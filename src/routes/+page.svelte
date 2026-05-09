@@ -26,7 +26,28 @@
   let missedCount = $state(0);
   let answeredIds = $state<Set<number>>(new Set());
   let copiedPrompt = $state(false);
+  let copyError = $state(false);
+  let copiedTimer: ReturnType<typeof setTimeout> | undefined;
   let showMobileCategories = $state(false);
+  let triggerEl: HTMLButtonElement | undefined = $state();
+  let drawerCloseEl: HTMLButtonElement | undefined = $state();
+  let prevDrawerOpen = false;
+
+  $effect(() => {
+    const open = showMobileCategories;
+    if (open && !prevDrawerOpen) {
+      drawerCloseEl?.focus();
+    } else if (!open && prevDrawerOpen) {
+      triggerEl?.focus();
+    }
+    prevDrawerOpen = open;
+  });
+
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && showMobileCategories) {
+      showMobileCategories = false;
+    }
+  }
 
   const studyFocusByCategory: Record<FlashcardCategory, string> = {
     'Microsoft 365 Basics':
@@ -56,7 +77,7 @@
   );
   let totalCards = $derived(filteredCards.length);
   let currentCard = $derived(filteredCards[currentIndex]);
-  let progressPercent = $derived(((currentIndex + 1) / totalCards) * 100);
+  let progressPercent = $derived(totalCards === 0 ? 0 : ((currentIndex + 1) / totalCards) * 100);
   let answeredCount = $derived(answeredIds.size);
   let filteredAnsweredCount = $derived(
     filteredCards.filter((card) => answeredIds.has(card.id)).length
@@ -64,10 +85,12 @@
   let scorePercent = $derived(
     answeredCount === 0 ? 0 : Math.round((knewCount / answeredCount) * 100)
   );
-  let studyFocus = $derived(studyFocusByCategory[currentCard.category]);
-  let resourceQuery = $derived(`${currentCard.category} ${currentCard.question} help desk`);
+  let studyFocus = $derived(currentCard ? studyFocusByCategory[currentCard.category] : '');
+  let resourceQuery = $derived(
+    currentCard ? `${currentCard.category} ${currentCard.question} help desk` : ''
+  );
   let usesMicrosoftLearn = $derived(
-    !['Customer Service', 'Scenarios'].includes(currentCard.category)
+    currentCard ? !['Customer Service', 'Scenarios'].includes(currentCard.category) : true
   );
   let resourceLabel = $derived(usesMicrosoftLearn ? 'Search Microsoft Learn' : 'Search YouTube');
   let resourceUrl = $derived(
@@ -76,7 +99,8 @@
       : `https://www.youtube.com/results?search_query=${encodeURIComponent(resourceQuery)}`
   );
   let chatPrompt = $derived(
-    `Act as a patient help desk interview coach. I am studying for a desktop support / Microsoft 365 interview.
+    currentCard
+      ? `Act as a patient help desk interview coach. I am studying for a desktop support / Microsoft 365 interview.
 
 Category: ${currentCard.category}
 Question: ${currentCard.question}
@@ -88,13 +112,19 @@ Teach me this topic in plain English. Then give me:
 3. Common mistakes candidates make
 4. Two follow-up interview questions with ideal answers
 5. A short practice scenario`
+      : ''
   );
   let chatGptUrl = $derived(`https://chatgpt.com/?q=${encodeURIComponent(chatPrompt)}`);
 
   function moveTo(index: number) {
-    currentIndex = (index + totalCards) % totalCards;
+    if (totalCards === 0) {
+      currentIndex = 0;
+    } else {
+      currentIndex = (index + totalCards) % totalCards;
+    }
     isFlipped = false;
     copiedPrompt = false;
+    copyError = false;
   }
 
   function nextCard() {
@@ -120,6 +150,7 @@ Teach me this topic in plain English. Then give me:
     currentIndex = 0;
     isFlipped = false;
     copiedPrompt = false;
+    copyError = false;
     showMobileCategories = false;
   }
 
@@ -128,12 +159,14 @@ Teach me this topic in plain English. Then give me:
     selectedCategory = 'All';
     isFlipped = false;
     copiedPrompt = false;
+    copyError = false;
     knewCount = 0;
     missedCount = 0;
     answeredIds = new Set();
   }
 
   function markCard(result: 'knew' | 'missed') {
+    if (!currentCard) return;
     const wasAnswered = answeredIds.has(currentCard.id);
     if (!wasAnswered) {
       answeredIds = new Set(answeredIds).add(currentCard.id);
@@ -151,22 +184,39 @@ Teach me this topic in plain English. Then give me:
   }
 
   function handleCardKeydown(event: KeyboardEvent) {
+    if (event.target !== event.currentTarget) return;
     if (event.key !== 'Enter' && event.key !== ' ') return;
 
     event.preventDefault();
     flipCard();
   }
 
-  async function copyPrompt() {
-    if (!navigator.clipboard) return;
-
-    await navigator.clipboard.writeText(chatPrompt);
+  function flashCopied() {
     copiedPrompt = true;
+    copyError = false;
+    if (copiedTimer) clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => {
+      copiedPrompt = false;
+    }, 2000);
+  }
+
+  async function copyPrompt() {
+    if (!navigator.clipboard) {
+      copyError = true;
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(chatPrompt);
+      flashCopied();
+    } catch {
+      copyError = true;
+      copiedPrompt = false;
+    }
   }
 
   function openInChatGPT() {
-    void navigator.clipboard?.writeText(chatPrompt).then(() => {
-      copiedPrompt = true;
+    navigator.clipboard?.writeText(chatPrompt).then(flashCopied, () => {
+      copyError = true;
     });
     window.open(chatGptUrl, '_blank', 'noopener,noreferrer');
   }
@@ -208,6 +258,8 @@ Teach me this topic in plain English. Then give me:
   />
 </svelte:head>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 <main class="min-h-screen bg-[#f7f8fb]">
   <section class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-6 lg:px-8">
     <header class="mb-3 flex flex-col gap-3 border-slate-200 sm:mb-5 sm:gap-4 sm:border-b sm:pb-5 md:flex-row md:items-end md:justify-between">
@@ -221,8 +273,10 @@ Teach me this topic in plain English. Then give me:
 
         <button
           type="button"
+          bind:this={triggerEl}
           class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-sm transition duration-300 ease-out hover:border-teal-500 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200 sm:hidden"
           aria-expanded={showMobileCategories}
+          aria-controls="mobile-category-drawer"
           onclick={() => (showMobileCategories = true)}
         >
           Topics: {selectedCategory}
@@ -246,7 +300,7 @@ Teach me this topic in plain English. Then give me:
     </header>
 
     {#if showMobileCategories}
-      <div class="fixed inset-0 z-50 sm:hidden" role="dialog" aria-modal="true" aria-label="Choose topic">
+      <div id="mobile-category-drawer" class="fixed inset-0 z-50 sm:hidden" role="dialog" aria-modal="true" aria-label="Choose topic">
         <button
           type="button"
           class="absolute inset-0 bg-slate-950/30"
@@ -266,6 +320,7 @@ Teach me this topic in plain English. Then give me:
             </div>
             <button
               type="button"
+              bind:this={drawerCloseEl}
               class="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-700 transition duration-300 ease-out hover:border-teal-500 hover:text-teal-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200"
               onclick={() => (showMobileCategories = false)}
             >
@@ -317,6 +372,7 @@ Teach me this topic in plain English. Then give me:
 
     <section class="grid flex-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div class="grid">
+        {#if currentCard}
         <div
           class={[
             'group w-full cursor-pointer rounded-lg p-0 text-left [perspective:1400px] focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200'
@@ -420,7 +476,7 @@ Teach me this topic in plain English. Then give me:
                     class="rounded-lg border border-slate-300 px-4 py-3 text-center text-sm font-bold text-slate-800 transition duration-300 ease-out hover:border-teal-600 hover:bg-teal-50 hover:text-teal-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-teal-200"
                     href={resourceUrl}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                   >
                     {resourceLabel}
                   </a>
@@ -429,13 +485,19 @@ Teach me this topic in plain English. Then give me:
                     class="rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white transition duration-300 ease-out hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-300"
                     onclick={copyPrompt}
                   >
-                    {copiedPrompt ? 'Prompt copied' : 'Copy ChatGPT prompt'}
+                    {copiedPrompt ? 'Prompt copied' : copyError ? 'Copy failed' : 'Copy ChatGPT prompt'}
                   </button>
                 </div>
               </div>
             </section>
           </div>
         </div>
+        {:else}
+          <div class="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center sm:min-h-[430px]">
+            <p class="text-lg font-semibold text-slate-900">No cards in this category</p>
+            <p class="mt-2 text-sm text-slate-500">Pick another topic to keep practicing.</p>
+          </div>
+        {/if}
       </div>
 
       <aside class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
