@@ -115,6 +115,7 @@ Teach me this topic in plain English. Then give me:
       : ''
   );
   let chatGptUrl = $derived(`https://chatgpt.com/?q=${encodeURIComponent(chatPrompt)}`);
+  let claudeUrl = $derived(`https://claude.ai/new?q=${encodeURIComponent(chatPrompt)}`);
 
   function moveTo(index: number) {
     if (totalCards === 0) {
@@ -214,16 +215,16 @@ Teach me this topic in plain English. Then give me:
     }
   }
 
-  function openInChatGPT() {
+  function openInAI(url: string) {
     navigator.clipboard?.writeText(chatPrompt).then(flashCopied, () => {
       copyError = true;
     });
-    window.open(chatGptUrl, '_blank', 'noopener,noreferrer');
+    window.open(url, '_blank', 'noopener,noreferrer');
   }
 
-  function openInChatGPTFromCard(event: MouseEvent) {
+  function openInAIFromCard(event: MouseEvent, url: string) {
     event.stopPropagation();
-    openInChatGPT();
+    openInAI(url);
   }
 
   function markCardFromAnswer(event: MouseEvent, result: 'knew' | 'missed') {
@@ -438,13 +439,22 @@ Teach me this topic in plain English. Then give me:
                       Missed this
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    class="rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white transition duration-300 ease-out hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-300 sm:ml-auto"
-                    onclick={openInChatGPTFromCard}
-                  >
-                    Open in ChatGPT
-                  </button>
+                  <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:ml-auto">
+                    <button
+                      type="button"
+                      class="rounded-lg bg-slate-950 px-4 py-3 text-sm font-bold text-white transition duration-300 ease-out hover:bg-slate-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-slate-300"
+                      onclick={(event) => openInAIFromCard(event, chatGptUrl)}
+                    >
+                      Open in ChatGPT
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-lg bg-orange-600 px-4 py-3 text-sm font-bold text-white transition duration-300 ease-out hover:bg-orange-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-orange-200"
+                      onclick={(event) => openInAIFromCard(event, claudeUrl)}
+                    >
+                      Open in Claude
+                    </button>
+                  </div>
                 </div>
                 <p class="text-center text-sm font-medium text-teal-800">
                   Click the card to return to the question
